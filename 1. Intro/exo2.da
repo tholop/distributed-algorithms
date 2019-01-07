@@ -1,0 +1,38 @@
+import sys
+from random import randint
+
+class U(process):
+
+    def setup(next):
+        self.next = next
+        return
+
+    def run():
+        while(True):
+            n = randint(1,2)
+            send(n, to=next)
+        return
+
+class V(process):
+
+    def setup():
+        self.has_r = False
+        return
+    
+    def run():
+        await(has_r)
+    
+    def receive(msg = n):
+        print(f"received {n}")
+        has_r = True
+    
+
+def main():
+    u = new(U)
+    v = new(V)
+
+    setup(v, ())
+    setup(u, (v,))
+
+    start([u,v])
+

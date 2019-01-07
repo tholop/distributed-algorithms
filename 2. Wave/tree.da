@@ -1,0 +1,60 @@
+import sys
+
+class U(process):
+
+    def setup(initial_value, output_neighbours):
+        self.initial_value = initial_value
+        self.output_neighbours
+        self.r_count = set()
+        self.sent = False
+        self.X = [initial_value]
+        self.has_received = False
+        return
+
+    def receive(msg=M, from_=sender):
+        X.extend(M)
+        r_count.add(sender)
+        self.has_received = True
+        return
+    
+    def run():
+        while(True):
+            remaining_neighbour = output_neighbours[0]
+            count_neighbours = 0
+            for (i, n) in enumerate(output_neighbours):
+                if n in r_count:
+                    count_neighbours += 1
+                else:
+                    remaining_neighbour = n
+            b = (count_neighbours>=(len(output_neighbours)-1))
+
+            if (count_neighbours >= (len(output_neighbours)-1) and (self.sent == False)):
+                # If received from all neighbours, send to any neighbour. We choose the last.
+                send(X, to=remaining_neighbour)
+                self.sent = True
+
+            elif count_neighbours == len(output_neighbours):
+                print(f"Decision : {X}")
+                return
+
+            else:            
+                # If this node has not send nor received, wait for a message.
+                await(self.has_received)
+                self.has_received = False
+        return
+
+
+def main():
+    
+    edges = [(0,1), (0,2), (2,3), (1,4)]
+    agents = list(new(U, num=5))
+    initial_values = [0,1,2,3,4]
+
+    for k in range(len(agents)):
+        out_k = [agents[j] for (i,j) in edges if (i == k)]
+        # Bidirectionnal
+        out_k = out_k + [agents[i] for (i,j) in edges if (j == k)]
+        setup(agents[k], (initial_values[k],out_k))
+
+    start(agents)
+

@@ -1,0 +1,74 @@
+# Pierre Tholoniat
+
+import sys
+from random import randint
+from time import sleep
+
+class U(process):
+
+    def setup(next_n, n):
+        self.next_n = next_n
+        self.n = n
+
+        self.level = 0
+        self.state = 0 # -1 for lost, 0 for passive, 1 for active
+        self.ident = 0
+        self.has_received = False
+        return
+
+    def receive(msg=M, from_=sender):
+        (l, i , h, u) = M
+        self.has_received = True
+        print(f"Received {M}")
+
+        if self.state <= 0:
+            # This node has lost, only relay information now
+            self.state = -1
+            send((l, i, h+1, u), to = next_n)
+        elif (l > self.level) or (l == self.level and i < self.ident):
+            # A more important message arrives
+            self.state = -1
+            send((l, i, h+1, u), to = next_n)
+        elif (l == self.level) and (i == self.ident):
+            if h < n:
+                # Not my own token, id collision
+                send((l, i, h+1, False), to = next_n)
+            elif u:
+                # My own token travelled the whole ring without encountering a competitor
+                output(f"Leader is {self} of id {self.ident}")
+            else:
+                # Start a new election
+                self.level = self.level + 1
+                self.ident = randint(1,n)
+                send((self.level, self.ident, 1, True), to = next_n)
+        # If a message with a lower level or a bigger id arrives, we drop it
+        # because the current node is already better
+        return
+    
+
+    def run():
+        # Add a random delay for a more interesting start
+        ms = randint(1,1000)
+        sleep(0.001 * ms)
+
+        # Launch an initiator if it's not too late. All nodes get a chance to init!
+        if(self.state == 0):
+            self.state = 1
+            self.level = 1
+            self.ident = randint(1,n)
+            send((self.level, self.ident, 1, True), to = next_n)
+
+        while(True):
+            await(self.has_received)
+            self.has_received = False
+
+        return
+
+
+def main():
+    
+    agents = list(new(U, num=6))
+    # Ring topology
+    for k in range(len(agents)):
+        setup(agents[k], (agents[(k+1) %6], 6))
+    start(agents)

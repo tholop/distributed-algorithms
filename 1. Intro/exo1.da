@@ -1,0 +1,37 @@
+import sys
+
+class U(process):
+
+    def setup(next):
+        self.next = next
+        return
+
+    def run():
+        send(1, to=next)
+        send(2, to=next)
+        return
+
+class V(process):
+
+    def setup():
+        self.has_r = False
+        return
+    
+    def run():
+        await(has_r)
+    
+    def receive(msg = n):
+        print("received")
+        has_r = True
+    
+
+
+def main():
+    u = new(U)
+    v = new(V)
+
+    setup(v, ())
+    setup(u, (v,))
+
+    start([u,v])
+

@@ -1,0 +1,410 @@
+# GHS Implementation - Pierre Tholoniat
+
+import random
+import math
+import time
+import graphviz
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import minimum_spanning_tree
+import numpy as np
+
+MAX_TICKS = 1000
+P_PASSIVE = 0.1
+DEBUG = False
+
+
+class Control(process):
+    """ Control node dedicated to capture a snapshot of the graph after termination
+        and perform checks on the result."""
+
+    def setup(agents, topo):
+        self.agents = agents
+        self.topo = topo
+        self.termination = False
+        self.snapshot_finished = False
+        self.count = 0  # Count the number of nodes that have registered
+        self.connections = []
+
+    def run():
+        debug("Started control")
+        await(self.termination)
+        time.sleep(5)
+        debug("Terminator is coming")
+        for p in self.agents:
+            send(["register"], to=p)
+        await(self.snapshot_finished)
+        if not connections_are_consistent():
+            print(
+                f"Error: inconsistent connections: {connections}. \n Two nodes disagree on the state of the channel between them.")
+
+        # Only keep one way of connections for the sake of readability
+        one_connections = connections.copy()
+        for (p, q) in one_connections:
+            one_connections.remove((q, p))
+
+        # print(f"MST gathered: {one_connections}")
+
+        computed_MST = csr_matrix((len(agents), len(agents)))
+        for (p,q,w) in topo:
+            if (p,q) in connections:
+                if p > q: # Convention on the matrix: lower triangular
+                    computed_MST[p,q] = w
+                else:
+                    computed_MST[q,p] = w
+        print(f"Computed MST: {computed_MST}.")
+
+        # print(f"\n Symmetric matrices.\nReference MST: {reference_MST()}.")
+        diff = (computed_MST - reference_MST()).nonzero()
+
+        print(f"Reference MST is equal to computed MST: {len(diff[0]) == 0 and len(diff[1]) == 0}")
+
+        show_graph_with_mst(computed_MST)
+
+
+    def get_id(process):
+        """ For a given process (printed <Agent:d8c04> for ex.), returns the corresponding integer id """
+        for index, q in enumerate(self.agents):
+            if q == process:
+                return index
+        return -1
+
+    def receive(msg=m, from_=q):
+        if m[0] == "term":
+            self.termination = True
+
+        elif m[0] == "register":
+            debug(f"Stach of {q} is {m[1]}")
+
+            count += 1
+            for p, stach in m[1].items():
+                if stach == "branch":
+                    connections.append((get_id(q), get_id(p)))
+
+            if self.count == len(self.agents):
+                snapshot_finished = True
+
+    def connections_are_consistent():
+        """ Check whether the selected branches are bidirectional."""
+        for (p, q) in connections:
+            if (q, p) not in connections:
+                return False
+        return True
+
+
+    def reference_MST():
+        """ Use scipy to compute the reference MST. """
+        adj_matrix = csr_matrix((len(agents), len(agents)))
+        for (p, q, w) in topo:
+            adj_matrix[p, q] = w
+            adj_matrix[q, p] = w
+        mst = minimum_spanning_tree(adj_matrix)
+
+        # lower triangular convention
+        for (p,q,w) in topo:
+            if mst[p,q] or mst[q,p]:
+                if p > q:
+                    mst[p,q] = w
+                    mst[q,p] = 0
+                else:
+                    mst[p,q] = 0
+                    mst[q,p] = w
+
+        mst.eliminate_zeros()
+
+        # print(mst.toarray().astype(int))        
+        return mst
+
+    def show_graph_with_mst(mst):
+
+
+        g = graphviz.Graph('G', engine='sfdp')
+
+        for (p,q,w) in topo:
+            if mst[p,q] or mst[q,p]:
+                g.edge(str(p),str(q),str(w), color='red')
+            else:
+                g.edge(str(p),str(q),str(w))
+
+        g.view()
+
+    def debug(string):
+        if DEBUG:
+            print("\t"+string)
+
+
+class Agent(process):
+
+    def setup(active, out_p, control):
+        self.out_p = out_p         # out_p is a dict associating a weight (unique) to an Agent
+        self.active = active
+        self.pending_is_empty = True
+        self.state = "sleep"
+        self.stach = {}
+        self.processing = False
+        self.name = None
+        self.control = control
+
+        # We choose to represent each channel as a FIFO queue (GHS paper).
+        # At reception, message are stored, and process separatedly.
+        # It is easy to delay messages: put them at the end of the queue.
+        # All messages are stored in a single queue, they contain the expeditor node.
+        self.pending_messages = []
+
+        for q in self.out_p.values():
+            self.stach[q] = "basic"
+
+    def run():
+        if self.active:
+            # This node is an initiator
+            node_initialization()
+
+        while(True):
+            # Avoid active waiting when there is no message to process
+            await(self.pending_messages)
+            m = self.pending_messages.pop(0)
+            process_message(m)
+
+
+    def node_initialization():
+        min_weight = sorted(out_p.keys())[0]
+        q = out_p[min_weight]
+
+        self.stach[q] = "branch"
+        debug(f"Branch : {self} - {q}")
+
+        self.level = 0
+        self.state = "found"
+        self.rec = 0
+        send(["connect", 0, self], to=q)
+
+    def receive(msg=m, from_=q):
+        if self.state == "sleep":
+            node_initialization()
+
+        debug(f"{self} received a message {m}.")
+        self.pending_messages.append(m)
+        pending_is_empty = False
+        return
+
+    def process_message(m):
+        """ Message switch. """
+        q = m[-1] # Syntax: the last cell of the message is the sending node.
+
+        if m[0] == "connect":
+            handle_connect(m[1], q)
+
+        elif m[0] == "initiate":
+            handle_initiate(m[1], m[2], m[3], q)
+
+        elif m[0] == "test":
+            handle_test(m[1], m[2], q)
+
+        elif m[0] == "accept":
+            handle_accept(q)
+
+        elif m[0] == "reject":
+            handle_reject(q)
+
+        elif m[0] == "report":
+            handle_report(m[1], q)
+
+        elif m[0] == "changeroot":
+            procedure_changeroot()
+
+        elif m[0] == "register":
+            procedure_register()
+
+        return
+
+    def process_message_later(m):
+        self.pending_messages.append(m)
+
+    def handle_connect(L, q):
+        """2. """
+        if L < self.level:
+            self.stach[q] = "branch"
+            debug(f"Branch : {self} - {q}")
+
+            send(["initiate", self.level, self.name, self.state, self], to=q)
+        elif self.stach[q] == "basic":
+            m = ["connect", L, q]
+            process_message_later(m)
+        else:
+            # Find the wieght corresponding to q
+            wpq = 0
+            for w, n in self.out_p.items():
+                if n == q:
+                    wpq = w
+            send(["initiate", self.level + 1, wpq, "find", self], to=q)
+        return
+
+    def handle_initiate(L, F, S, q):
+        """3. """
+        self.level = L
+        self.name = F
+        self.state = S
+        self.father = q
+        self.bestch = None
+        self.bestwt = math.inf
+
+        for r in out_p.values():
+            if self.stach[r] == "branch" and r != q:
+                send(["initiate", L, F, S, self], to=q)
+        if self.state == "find":
+            self.rec = 0
+            procedure_test()
+        return
+
+    def procedure_test():
+        """ 4. """
+
+        # Find the min weight basic neighbour if it exists
+        q_0 = None
+        min_weight = math.inf
+        for w, q in self.out_p.items():
+            if self.stach[q] == "basic":
+                if w < min_weight:
+                    q_0 = q
+                    min_weight = w
+
+        if q_0 is None:
+            self.testch = None
+            procedure_report()
+        else:
+            self.testch = q_0
+            send(["test", self.level, self.name, self], to=q_0)
+        return
+
+    def handle_test(L, F, q):
+        """5. """
+        if L > self.level:
+            m = ["test", L, F, q]
+            process_message_later(m)
+        elif F == self.name:        # Internal edge
+            if self.stach[q] == "basic":
+                self.stach[q] = "reject"
+
+            if q != self.testch:
+                send(["reject", self], to=q)
+            else:
+                procedure_test()
+        else:
+            send(["accept", self], to=q)
+        return
+
+    def handle_accept(q):
+        """ 6. """
+        self.testch = None
+        wpq = 0
+        for w, n in self.out_p.items():
+            if n == q:
+                wpq = w
+
+        if wpq < self.bestwt:
+            self.bestwt = wpq
+            self.bestch = q
+
+        procedure_report()
+
+        return
+
+    def handle_reject(q):
+        """7. """
+        if self.stach[q] == "basic":
+            self.stach[q] = "reject"
+        procedure_test()
+        return
+
+    def procedure_report():
+        """ 8. """
+        count = 0
+        for q in self.out_p.values():
+            if self.stach[q] == "branch" and q != self.father:
+                count += 1
+        if count == rec and self.testch is None:
+            self.state = "found"
+            send(["report", self.bestwt, self], to=self.father)
+
+        return
+
+    def handle_report(w, q):
+        """ 9. """
+        if q != self.father:
+            if w < self.bestwt:
+                self.bestwt = w
+                self.bestch = q
+            self.rec += 1
+            procedure_report()
+        else:
+            if self.state == "find":
+                m = ["report", w, q]
+                process_message_later(m)
+            elif w > self.bestwt:
+                procedure_changeroot()
+            elif w == self.bestwt and w == math.inf:
+                debug("STOP.")
+                send(["term"], to=self.control)
+        return
+
+    def procedure_changeroot():
+        """ 10. """
+        if self.stach[self.bestch] == "branch":
+            send(["changeroot", self], to=self.bestch)
+        else:
+            send(["connect", self.level, self], to=self.bestch)
+            self.stach[self.bestch] = "branch"
+            debug(f"Branch : {self} - {self.bestch}")
+
+        return
+
+    def procedure_register():
+        """ Special procedure only called after termination. """
+        send(["register", self.stach], to=self.control)
+
+    def debug(string):
+        if DEBUG:
+            print("\t"+string)
+
+
+def main():
+    config(channel='fifo')
+
+    # Undirected topology. Node u, Node v, Weight.
+    topo_0 = [(0, 1, 1), (0, 4, 2), (0, 6, 3), (1, 2, 4), (1, 8, 14), (2, 3, 5), (3, 4, 6), (4, 5, 7),
+              (5, 0, 8), (6, 5, 9), (6, 7, 10), (7, 0, 11), (8, 7, 12), (8, 9, 13)]
+    l_0 = 10
+
+    topo_1 = [(0, 1, 1), (1, 2, 2), (0, 2, 3)]
+    l_1 = 3
+
+    topo_2 = [(0, 1, 1), (1, 2, 2), (2, 3, 3)]
+    l_2 = 4
+
+    topo = topo_0
+    l = l_0
+
+    agents = list(new(Agent, num=l))
+
+    # Central control to perform check after termination
+    control = new(Control)
+    setup(control, args=[agents, topo])
+
+    # Random number of initiators
+    ni = random.randint(1, l)
+    kis = random.sample(range(l), ni)
+
+    # Setup nodes
+    for k in range(len(agents)):
+        out_k = {}
+        for (u, v, w) in topo:  # Using the fact that weights are unique
+            if u == k:
+                out_k[w] = agents[v]
+
+            elif v == k:
+                out_k[w] = agents[u]
+
+        setup(agents[k], args=(k in kis, out_k, control))
+
+    # Launch
+    start(control)
+    start(agents)

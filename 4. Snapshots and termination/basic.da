@@ -1,0 +1,46 @@
+import random
+
+MAX_TICKS = 1000
+P_PASSIVE = 0.1
+
+class Agent(process):
+    def setup(active, out_p):
+        self.ticks = random.randint(0, MAX_TICKS)
+
+    def run():
+        # The initiator must send at least one basic message
+        if active:
+            send('tok', to=out_p)
+
+        while(True):
+            await(active)
+            if random.random() < P_PASSIVE:
+                # Spontaneously switch to passive
+                active = False
+            else:
+                # Send a message to outgoing neighbors
+                if ticks > 0:
+                    send('tok', to=out_p)
+                    ticks -= 1
+                else:
+                    # Switch to passive
+                    active = False
+
+    def receive(msg='tok', from_=q):
+        # Switch to active
+        active = True
+
+def main():
+    agents = list(new(Agent, num=10))
+
+    topo = [(0,1), (0,4), (0,5), (0,6), (1,2), (1,8), (2,3), (3,4), (4,5),
+            (5,0), (6,5), (6,7), (7,0), (8,7), (8,9), (9,8)]
+
+    # Random number of initiators
+    ni = random.randint(1, 10)
+    kis = random.sample(range(len(agents)), ni)
+    for k in range(len(agents)):
+        out_k = [agents[v] for (u,v) in topo if u == k]
+        setup(agents[k], args=(k in kis, out_k))
+
+    start(agents)

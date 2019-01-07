@@ -1,0 +1,108 @@
+import sys
+
+
+class I(process):
+
+    def setup(initial_value, output_neighbours):
+        self.initial_value = initial_value
+        self.output_neighbours
+        self.sent = set()
+        self.received = set()
+        self.X = set([initial_value])
+        self.father = None
+        self.has_received = False
+        return
+
+    def receive(msg=M, from_=sender):
+        X = X.union(M)
+        self.received.add(sender)
+        self.has_received = True
+
+        if self.father is None:
+            self.father = sender
+        
+        for w in output_neighbours:
+            if not (w in self.sent) and w != father:
+                send(self.X, to=w)
+                self.sent.add(w)
+                return
+
+        # If we reach this point, already sent to all neighbors. Decide.
+        
+        output(f"Decide X={X}")
+
+        return
+    
+    def run():
+        
+        # Initiation
+        self.father = self
+        send(X, to=self.output_neighbours[0])
+        self.sent.add(output_neighbours[0])
+        
+        while(True):
+            await(self.has_received)
+            self.has_received = False
+
+        return
+
+class U(process):
+
+    def setup(initial_value, output_neighbours):
+        self.initial_value = initial_value
+        self.output_neighbours
+        self.sent = set()
+        self.received = set()
+        self.X = set([initial_value])
+        self.father = None
+        self.has_received = False
+
+        return
+
+    def receive(msg=M, from_=sender):
+        print(f"Received {self.initial_value}")
+        X = X.union(M)
+        self.received.add(sender)
+
+        if self.father is None:
+            self.father = sender
+        
+        for w in output_neighbours:
+            if not (w in self.sent) and w != father:
+                send(X, to=w)
+                self.sent.add(w)
+                return
+
+        # If we reach this point, already sent to all neighbors.
+        
+        if not (self.father in self.sent):
+            send(X, to=self.father)
+            self.sent.add(self.father)
+
+        return
+
+    def run():
+
+        while(True):
+            await(self.has_received)
+            self.has_received = False
+
+        return
+        
+    
+
+def main():
+    
+    edges = [(0,1), (0,2), (2,3), (1,4), (1,5), (1,2)]
+    agents = [new(I)]
+    agents = agents + list(new(U, num=5))
+    initial_values = [0,1,2,3,4,5]
+
+    for k in range(len(agents)):
+        out_k = [agents[j] for (i,j) in edges if (i == k)]
+        # Bidirectionnal
+        out_k = out_k + [agents[i] for (i,j) in edges if (j == k)]
+        setup(agents[k], (initial_values[k],out_k))
+
+    start(agents)
+

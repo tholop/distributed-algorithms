@@ -1,0 +1,137 @@
+import random
+
+
+MAX_TICKS = 1000
+P_PASSIVE = 0.1
+
+
+class RegisteringAgent(process):
+    # This node is dedicated to store the snapshot
+    # We just use a basic list and print the messages, but could update some database for instance
+    def setup():
+        self.states = {}
+        self.channels = {}
+        self.active = True
+
+    def run():
+        while(True):
+            await(self.active)
+
+    def receive(msg=m, from_=n):
+        self.active = True
+        print(f"Received message to store: {m}.")
+        l = str(m[6:]).split(",")
+
+        self.states
+
+        if m[0:4] == "Chan":
+            if l[0] not in channels:
+                channels[l[0]] = {}
+            channels[l[0]][l[1]] = l[2]
+        if m[0:4] == "Node":
+            states[l[0]] = l[1:]
+
+
+class Agent(process):
+
+    def setup(active, out_p, registering):
+        self.ticks = random.randint(0, MAX_TICKS)
+        self.saved = False
+        self.register = {}
+        self.pending_channels = set([])
+        self.registering = registering
+
+    def run():
+        # The initiator must send at least one basic message
+        if active:
+            # Saving procedure
+            local_state = "Node: " + \
+                str(self) + "," + str(active) + "," + str(ticks)
+            send(local_state, to=registering)
+
+            saved = True
+
+            send('mrk', to=out_p)
+            send('tok', to=out_p)
+
+        while(True):
+            await(active)
+            if random.random() < P_PASSIVE:
+                # Spontaneously switch to passive
+                active = False
+            else:
+                # Send a message to outgoing neighbors
+                if ticks > 0:
+                    send('tok', to=out_p)
+                    ticks -= 1
+                else:
+                    # Switch to passive
+                    active = False
+
+    def receive(msg='tok', from_=q):
+        # Switch to active
+        active = True
+        if saved:
+            # The saving procedure has already started for this node, store the pending messages
+            if str(q) in pending_channels:
+                register[str(q)].append('tok')
+            else:
+                pending_channels.add(str(q))
+                register[str(q)] = ['tok']
+
+    def receive(msg='mrk', from_=q):
+        if not saved:
+            # Saving procedure
+            local_state = "Node: " + \
+                str(self) + "," + str(active) + "," + str(ticks) + ""
+            send(local_state, to=registering)
+
+            channel_state = "Chan: " + \
+                str(q) + "," + str(self) + ",[]"
+            send(channel_state, to=registering)
+            # register["active"] = active
+            # register["ticks"] = ticks
+            # register[str(q)] = []
+
+            saved = True
+            send('mrk', to=out_p)
+
+        if saved:
+            # The node was already in saving procedure and got another marker:
+            # the corresponding channel can be freezed
+
+            if str(q) in pending_channels:
+                channel_state = "Chan: " + str(q) + "," + \
+                    str(self) + "," + str(register[str(q)]) + ""
+                pending_channels.remove(str(q))
+
+            else:
+                # The second marker arrives when the channel is still empty, no pending message
+                channel_state = "Chan: " + str(q) + "," + str(self) + ",[]"
+
+            send(channel_state, to=registering)
+
+            pass
+
+
+def main():
+    config(channel='fifo')
+
+    agents = list(new(Agent, num=10))
+
+    topo = [(0, 1), (0, 4), (0, 5), (0, 6), (1, 2), (1, 8), (2, 3), (3, 4), (4, 5),
+            (5, 0), (6, 5), (6, 7), (7, 0), (8, 7), (8, 9), (9, 8)]
+
+    # Setup a registering node
+    registering = new(RegisteringAgent)
+    setup(registering, ())
+    # Random number of initiators
+    ni = random.randint(1, 10)
+    kis = random.sample(range(len(agents)), ni)
+    for k in range(len(agents)):
+        out_k = [agents[v] for (u, v) in topo if u == k]
+        setup(agents[k], args=(k in kis, out_k, registering))
+
+    start(registering)
+
+    start(agents)
